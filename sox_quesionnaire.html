@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>sox主观倾向定位量表</title>
+    <style>
+        :root { --primary-color: #2c3e50; --bg-color: #f0f2f5; --card-bg: #ffffff; }
+        body { font-family: 'PingFang SC', system-ui, sans-serif; background-color: var(--bg-color); color: #333; padding: 20px; }
+        .container { max-width: 850px; margin: 0 auto; background: var(--card-bg); padding: 40px; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: var(--primary-color); margin-bottom: 30px; }
+        .section-title { border-left: 5px solid #e74c3c; padding-left: 15px; margin: 30px 0 20px; font-weight: bold; font-size: 1.25em; color: #2c3e50; }
+        .question { margin-bottom: 20px; padding: 15px; border-radius: 8px; background: #fafafa; }
+        .question-text { font-weight: 500; display: block; margin-bottom: 12px; }
+        .options { display: flex; justify-content: space-between; align-items: center; max-width: 550px; margin: 0 auto; }
+        .options label { font-size: 0.85em; color: #888; width: 60px; text-align: center; }
+        input[type="radio"] { cursor: pointer; transform: scale(1.2); }
+        
+        .submit-btn { display: block; width: 100%; padding: 18px; background: #e74c3c; color: white; border: none; border-radius: 8px; font-size: 1.2em; cursor: pointer; margin-top: 40px; transition: 0.3s; font-weight: bold; }
+        .submit-btn:hover { background: #c0392b; }
+
+        #result-area { display: none; margin-top: 50px; padding-top: 30px; border-top: 3px solid #eee; text-align: center; }
+        canvas { background: #fff; border: 2px solid #333; margin: 25px auto; display: block; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
+        .analysis { text-align: left; background: #fdfdfd; padding: 25px; border-radius: 10px; border: 1px solid #eee; margin-top: 25px; }
+        .coord-val { font-size: 1.5em; font-weight: bold; color: #e74c3c; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>sox观点立场定位量表</h1>
+    <p style="text-align:center; color:#666;">请根据您的第一直觉，对以下 14 项陈述进行主观评价。</p>
+
+    <form id="surveyForm">
+        <div class="section-title">第一部分：内部价值取向（决定 Y 轴）</div>
+        <div id="v-questions"></div>
+
+        <div class="section-title">第二部分：外部管控取向（决定 X 轴）</div>
+        <div id="c-questions"></div>
+
+        <button type="button" class="submit-btn" onclick="processData()">计算我的坐标</button>
+    </form>
+
+    <div id="result-area">
+        <h2>定位分析报告</h2>
+        <p>您的主观坐标为：<span id="coord-display" class="coord-val"></span></p>
+        <canvas id="chartCanvas" width="600" height="600"></canvas>
+        <div class="analysis" id="analysis-text"></div>
+    </div>
+</div>
+
+<script>
+    // 内部价值题 (Value -> Y轴)
+    const valQuestions = [
+        { id: 'V1', text: '性本质上是多巴胺驱动的生理奖励，不应附带过重的道德包袱。', type: 'comm' },
+        { id: 'V2', text: '在双方自愿的前提下，出卖性服务与出卖脑务（如陪聊）逻辑是一致的。', type: 'comm' },
+        { id: 'V3', text: '身体是我的私有资产，我可以像处理商品一样处理它而不损及尊严。', type: 'comm' },
+        { id: 'V4', text: '性是人格完整性的体现，一旦进入交易，人格就会被物化。', type: 'sacr' },
+        { id: 'V5', text: '哪怕双方自愿，我也认为明码标价是对生命契约的亵渎。', type: 'sacr' },
+        { id: 'V6', text: '纯粹的感官消费可以让性变得更高效简单，避开复杂的情感负担。', type: 'comm' },
+        { id: 'V7', text: '我认为性是区分文明与荒蛮的精神防线，绝不能作为普通商品。', type: 'sacr' }
+    ];
+
+    // 外部管控题 (Control -> X轴)
+    const ctrlQuestions = [
+        { id: 'C1', text: '只要是成年人之间的共识行为，国家和法律都没有干涉的资格。', type: 'indiv' },
+        { id: 'C2', text: '法律的职责应限于保护契约安全（防强迫），而非审查交易内容。', type: 'indiv' },
+        { id: 'C3', text: '社会应该保持道德层面的“清朗”，取缔此类行为是为了大众利益。', type: 'clean' },
+        { id: 'C4', text: '堵不如疏，通过职业化、税收和强制体检来管理是更理性的选择。', type: 'indiv' },
+        { id: 'C5', text: '为了保护下一代的价值观，必须从社会环境中彻底根除此类交易。', type: 'clean' },
+        { id: 'C6', text: '社会的进步体现在对非主流选择的包容，而非用单一道德标准强加。', type: 'indiv' },
+        { id: 'C7', text: '如果允许这种行为存在，必然会导致社会家庭结构瓦解和治安恶化。', type: 'clean' }
+    ];
+
+    function renderQs() {
+        const build = (qs, divId) => {
+            const el = document.getElementById(divId);
+            qs.forEach((q, i) => {
+                const d = document.createElement('div');
+                d.className = 'question';
+                d.innerHTML = `
+                    <span class="question-text">${i+1}. ${q.text}</span>
+                    <div class="options">
+                        <label>强烈反对</label>
+                        ${[1,2,3,4,5].map(v => `<input type="radio" name="${q.id}" value="${v}" ${v===3?'checked':''}>`).join('')}
+                        <label>强烈认同</label>
+                    </div>`;
+                el.appendChild(d);
+            });
+        };
+        build(valQuestions, 'v-questions');
+        build(ctrlQuestions, 'c-questions');
+    }
+
+    function processData() {
+        let sv = 0; // Value Score (Commodity vs Sanctity)
+        let sc = 0; // Control Score (Individualism vs Cleansing)
+
+        valQuestions.forEach(q => {
+            let v = parseInt(document.querySelector(`input[name="${q.id}"]:checked`).value);
+            sv += (q.type === 'comm') ? v : (6 - v);
+        });
+
+        ctrlQuestions.forEach(q => {
+            let v = parseInt(document.querySelector(`input[name="${q.id}"]:checked`).value);
+            sc += (q.type === 'indiv') ? (6 - v) : v; // 低分是个体论(负向)，高分是清洗论(正向)
+        });
+
+        // 映射到 [-5, 5]
+        // 原分范围 7-35, 中点 21. 系数: (35-21)/5 = 2.8
+        let yCoord = (21 - sv) / 2.8; // sv高(契约) -> y负; sv低(神圣) -> y正
+        let xCoord = (sc - 21) / 2.8; // sc高(清洗) -> x正; sc低(个体) -> x负
+
+        document.getElementById('result-area').style.display = 'block';
+        document.getElementById('coord-display').innerText = `(${xCoord.toFixed(1)}, ${yCoord.toFixed(1)})`;
+        
+        draw(xCoord, yCoord);
+        analyze(xCoord, yCoord);
+        window.scrollTo({ top: document.getElementById('result-area').offsetTop - 50, behavior: 'smooth' });
+    }
+
+    function draw(x, y) {
+        const can = document.getElementById('chartCanvas');
+        const ctx = can.getContext('2d');
+        const mid = 300;
+        const scale = 50; // 1单位 = 50px
+
+        ctx.clearRect(0,0,600,600);
+        
+        // 背景象限色
+        ctx.globalAlpha = 0.2;
+        ctx.fillStyle = "#e74c3c"; ctx.fillRect(mid, 0, mid, mid);     // 右上: 管控+神圣
+        ctx.fillStyle = "#3498db"; ctx.fillRect(0, 0, mid, mid);       // 左上: 自由+神圣
+        ctx.fillStyle = "#95a5a6"; ctx.fillRect(0, mid, mid, mid);     // 左下: 自由+商化
+        ctx.fillStyle = "#f1c40f"; ctx.fillRect(mid, mid, mid, mid);   // 右下: 管控+商化
+        ctx.globalAlpha = 1.0;
+
+        // 绘制坐标轴
+        ctx.beginPath();
+        ctx.strokeStyle = "#2c3e50"; ctx.lineWidth = 2;
+        ctx.moveTo(50, mid); ctx.lineTo(550, mid);
+        ctx.moveTo(mid, 50); ctx.lineTo(mid, 550);
+        ctx.stroke();
+
+        // 标注
+        ctx.font = "bold 14px Arial"; ctx.fillStyle = "#2c3e50"; ctx.textAlign = "center";
+        ctx.fillText("生命神圣化 (Y+5)", mid, 40);
+        ctx.fillText("纯粹生物/商业化 (Y-5)", mid, 575);
+        ctx.textAlign = "left"; ctx.fillText("道德大清洗 (X+5)", 465, mid - 10);
+        ctx.textAlign = "right"; ctx.fillText("主权个体论 (X-5)", 135, mid - 10);
+
+        // 绘制坐标点
+        const px = mid + (x * scale);
+        const py = mid - (y * scale);
+
+        ctx.beginPath(); ctx.arc(px, py, 10, 0, Math.PI*2);
+        ctx.fillStyle = "red"; ctx.fill();
+        ctx.strokeStyle = "#fff"; ctx.lineWidth = 3; ctx.stroke();
+    }
+
+    function analyze(x, y) {
+        let h = "<h3>立场特质描述：</h3>";
+        if (x >= 0 && y >= 0) h += "<p><b>【正统守护者】</b>：您主张性具有不可侵犯的伦理价值，并倾向于利用社会公权力或集体规则来捍卫这种价值观，对抗异化风险。</p>";
+        else if (x < 0 && y >= 0) h += "<p><b>【人文自由派】</b>：您在私人领域高度尊崇生命和性的神圣感，但坚决反对将这种私人标准强加于人，主张个体对身体拥有绝对支配权。</p>";
+        else if (x >= 0 && y < 0) h += "<p><b>【秩序实用派】</b>：您对性的看法较为去魅和工具化，但由于担心这种行为带来的社会副作用，您支持对其进行严格的行政或法律管控。</p>";
+        else h += "<p><b>【彻底自由主义】</b>：您彻底解构了性的神圣叙事，并主张撤消一切形式的社会干预。在您看来，这仅仅是成年人之间的私人资源交换。</p>";
+        
+        document.getElementById('analysis-text').innerHTML = h;
+    }
+
+    window.onload = renderQs;
+</script>
+
+</body>
+</html>
